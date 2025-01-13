@@ -1,0 +1,325 @@
+---
+title: "ANOVA Model for Predicting Vertical Diameter of Skin Lesions"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+<!-- The author of this template is Dr. Gordan Zitkovic.-->
+<!-- The code chunk below contains some settings that will  -->
+<!-- make your R code look better in the output pdf file.  -->
+<!-- If you are curious about what each option below does, -->
+<!-- go to https://yihui.org/knitr/options/ -->
+<!-- If not, feel free to disregard everything ...  -->
+```{r echo=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  fig.align="center",
+  fig.pos="t",
+  strip.white = TRUE
+)
+```
+<!-- ... down to here. -->
+
+## About the data:  
+The original dataset contains patient skin lesion information covering different types of skin lesions. The data was collected with the Surgical Assistance Program at the Federal University of Espirito Santo. This program focuses on providing treatment to low-income individuals, so this demographic may be reflected in the data. The data was collected after a patient came to make an appointment. The observations are not exactly random and independent since it might be the case that family members come to get treatment together. However, since patient conditions are generally independent of each other and there are many observations, it makes sense to treat the data as "like" random and independent. The main variables of interest for this analysis are the vertical diameter of the skin lesion, the region of the skin lesion, and the type of skin lesion.
+
+## Purpose:  
+We want to explore the relationship between some aspect of the size of the lesion and the type of the lesion. For example, if we find that the mean size of a Basal Cell Carcinoma (BCC) lesion is significantly different from the mean size of a Squamous Cell Carcinoma (SCC) or Actinic Keratosis (ACK) lesion, then perhaps the lesion size can help us in the diagnosis of the type of skin lesion. The vertical diameter of the lesion was used as a representation for size. 
+
+## Executive summary:  
+We fit a 2-way ANOVA model with interaction with log vertical diameter as the response and region and diagnostic as the predictors. Based on the F-tests from the ANOVA output, we found that there was sufficient evidence at the 5% significance level that at least one of the region effects was nonzero, at least one of the diagnostic effects was nonzero, and at least one of the interaction effects was nonzero. Creating an interaction plot to check for the need for interaction, we found nonparallel lines, which is a sign that interaction is present. Confirming with a Tukey Nonadditivity plot, we found that plotting the residuals against the comparison values did not result in points that lied along a line, so there is no transformation of vertical diameter that can make the region and diagnostic effects additive without interaction. A log transform of vertical diameter was chosen after inspecting a log standard deviations vs log means plot to better meet the constant variance of residuals condition. Evaluating the residuals vs fitted values plot, the constant variance of residuals condition was met. The normal quantiles plot shows some deviation from the normality of residuals assumption at the lower and upper quantiles, though we considered it acceptable since the deviation was not too extreme. The random and independent errors condition is met based on the collection of the data. Overall, model conditions were met.
+
+Since there was sufficient evidence that at least one of the interaction effects was nonzero, we proceeded to create confidence intervals using Fisher's LSD. Since interaction is present, it makes more sense to focus on inference about conditional effects. We chose to do two tests, with the first conditioning on the region being arm and the second conditioning on the region being face. When we conditioned on arm, we found that there was sufficient evidence at the 95% confidence level that there is a difference in mean log vertical diameter between ACK and BCC and ACK and SCC diagnostic groups. At the 95% confidence level, there was not sufficient evidence that the difference in mean log vertical diameter between BCC and SCC was significant, conditional on the region being arm. For our second test, at the 95% confidence level, there was not sufficient evidence that the difference in mean log vertical diameter between any of the groups was significant, conditional on the region being face. We concluded that depending on the region, there may or may not be a significant difference in vertical diameter between diagnostic groups. 
+
+An example of a confidence interval that we produced is for the difference in mean log vertical diameter between ACK and BCC lesions, conditioned on the region being arm. The 95% confidence interval was of the form (-0.7088512, -0.2516080). We interpreted it as such: we are 95% confident that the true difference in mean log vertical diameter between ACK and BCC lesions of the arm is between -0.709 and -0.252. Converting to standard scaling by exponentiating the bounds, we are 95% confident that the true ratio in mean vertical diameter between ACK and BCC lesions of the arm is between 0.492 and 0.778. In general, we can extrapolate our findings to the larger population of patients with skin lesions targeted by programs like the Federal University of Espirito Santo's Surgical Assistance Program since we can treat the observations as "like" random and independent based on the data collection methods.
+
+## Modeling choices:
+
+```{r}
+data = read.csv('cleaned_skin_lesions.csv')
+data$log_vertical_diameter = log(data$vertical_diameter)
+```
+
+
+We want to fit a 2-way ANOVA model with diagnostic and region as the predictor variables and vertical diameter as the response variable. We are using region as a blocking variable because it seems plausible that the size of the lesion is different for different skin regions, so region would hopefully account for some of the variability in vertical diameter.
+
+Before we fit the model, we may want to see if interaction is present. If interaction is present, then the diagnostic effect on the response will depend on the region and vice-versa. To test for interaction, we can create an interaction plot where we plot group means with one factor on the x-axis and another factor as traces. If no interaction is present, then the effect of one factor on the response does not depend on the level of the other factor, so the trace lines would be parallel. 
+
+```{r}
+interaction.plot(data$region, data$diagnostic, data$vertical_diameter)
+```
+
+We can see that the trace lines are not exactly parallel, so there is evidence of interaction. Fitting a model with interaction requires replication, which means that there are multiple observations for each combination of levels of the factors. Luckily, this condition is met. 
+
+## Model fit: 
+
+A two-way ANOVA model with interaction has the form 
+$$VD = \mu + \alpha_i + \beta_j + \gamma_{ij} + \epsilon $$
+where $VD$ is the vertical diameter response, $\mu$ is the grand mean, $\alpha_i$ is the diagnostic effect, $\beta_j$ is the region effect, $\gamma_{ij}$ is the interaction effect, and $\epsilon$ is the random error. The fitted model has the form 
+$$\hat{VD} = \hat\mu + \hat\alpha_i + \hat\beta_j + \hat\gamma_{ij}  $$
+Here is how the model is fit (for balanced design):  
+1. The estimate for the grand mean, $\hat \mu$, is found by averaging the vertical diameter over all observations.    
+2. Estimate the combination group means $\hat\mu_{ij}$ for every combination of levels of the factors.  
+3. For each diagnostic group $i$, estimate the diagnostic group mean $\hat\mu_i$ by averaging the combination group means, conditioning on $i$ across all levels of the region factor.  
+4. Estimate the diagnostic effects $\hat\alpha_i$ by finding the distance between the grand mean and the diagnostic group means.  
+5. Repeat steps 3 and 4 for the region factor.  
+6. The interaction effects $\hat\gamma_{ij}$ are the difference between the combination group means found in step 2 and the grand mean + corresponding diagnostic effect + corresponding region effect.  
+7. The residuals can be found as the difference between each individual observation and its corresponding combination group mean (cell mean). 
+
+For unbalanced designs, the idea is similar, but we may use weighted means that account for the correlation between the factors that result from uneven sample sizes [(Unbalanced ANOVA)](https://www.r-bloggers.com/2011/02/r-tutorial-series-two-way-anova-with-unequal-sample-sizes/). 
+
+```{r}
+inter_model = aov(data$vertical_diameter ~ data$diagnostic* data$region)
+summary(inter_model)
+```
+
+## Assessing fit: 
+
+From the output, we have 3 F values and 3 corresponding p-values.  
+The F values (with the respective row numerator degrees of freedom and residuals denominator degrees of freedom) are calculated by dividing the respective mean squares by the mean square of residuals. These mean squares are found by dividing the respective sum of squares by its associated degrees of freedom. Thus, even though the sum of squares for the residuals is high, the high degrees of freedom for the residuals results in a relatively lower mean squares value. For the F tests, the mean squares are the main focus.
+
+The first null hypothesis associated with $F=5.468$ is   
+$H_0: \alpha_i = 0$ for all $i$  
+The second null hypothesis associated with $F=10.072$ is  
+$H_0: \beta_j = 0$ for all $j$  
+The third null hypothesis associated with $F=2.035$ is  
+$H_0: \gamma_{ij} = 0$ for all $i,j$
+
+Since the p-values associated with the F values are all small $<0.05$, there is sufficient evidence to reject the null hypothesis in all three cases. Thus, there is sufficient evidence that at least one diagnosis effect is nonzero, at least one vertical diameter effect is nonzero, and at least one interaction effect is nonzero. This suggests that there is a difference in mean vertical diameter between different combinations of levels of diagnostic and region.
+
+## Model assumptions: 
+
+Now let's check model assumptions.
+
+Additivity of main effects (check for need for interaction):
+
+The 2-way ANOVA model with interaction assumes that the vertical diameter can be written as 
+$$VD = \mu + \alpha_i + \beta_j + \gamma_{ij} + \epsilon $$
+where $\alpha_i$ and $\beta_j$ are the main effects and $\gamma_{ij}$ is the interaction effect. However, it may be a good idea to check if the interaction term is actually necessary. We can check this by looking at side by side boxplots. If the main effects are additive without the need for interaction, we would expect the boxplots to be vertical shifts of each other.
+```{r}
+boxplot(vertical_diameter ~ diagnostic*region, data=data)
+```
+It is clear that some of the boxplots are notably larger while some of the boxplots are notably smaller. This variation in the size of the boxplots suggests that interaction is present. 
+
+Residuals are random and independent:  
+Based on the data collection methods, we can think of the residuals as "like" random. Also it makes sense to consider the residuals as independent since in general, the vertical diameter for one patient shouldn't affect the vertical diameter for another patient.
+
+Residuals have the same variance in each group (combination of levels):  
+For this condition, we can look at a residuals vs fitted values plot.
+```{r}
+plot( inter_model$fitted.values, inter_model$residuals)
+abline(0,0)
+```
+From the residuals vs fitted values plot, the spread in the residuals seems to be increasing slightly over the fitted values.  There are some groups with extreme positive residuals. Overall, the condition of the residuals having the same variability in each group is not perfectly met.
+Additionally, the residuals vs fitted values plot can be partially used to assess the assumption that we can write the vertical diameter as 
+$$VD = \mu + \alpha_i + \beta_j + \gamma_{ij} + \epsilon $$
+where the main effects and interaction effect can be considered "additive" in the sense that they add together to estimate the vertical diameter. If the errors are actually random, independent, and normal with constant variance, then if these effects are "additive", we would expect to see no extreme outliers and no patterns in the plot such as curves. From the residuals vs fitted values plot, there is no obvious pattern, but there are some outliers. It seems that for these points, there is some other factor not accounted for by the model such that simply adding the effects does not result in a good prediction. However, in general, "additivity" is not too bad.  
+
+Residuals are normally distributed:  
+For this condition, we can look at a normal quantile plot.  
+```{r}
+qqnorm(inter_model$residuals)
+qqline(inter_model$residuals)
+```
+The normal quantile plot shows strong deviation from normality at the upper quantiles. There appears to be a curve and a strong deviation from normality. The normality of residuals assumption is not met. 
+
+Additivity: Is there a transformation that can allow an additive model without a transformation?  
+To explore this question, we can look at a Tukey plot. If the points lie close to a line, then there is a transformation for which the diagnostic and region effects will be additive with no interaction. 
+
+```{r}
+library(Stat2Data)
+
+TukeyNonaddPlot(vertical_diameter ~ diagnostic + region, data, out = "n",
+  main = "Tukey Nonadditivity Plot", ylab = "Residuals")
+```
+The Tukey plot suggests a transformation of the response to the power 1-(-3.88)=4.88, but the points do not lie close to the regression line. This suggests there is no transformation that will result in an additive model with diagnostic and region as factors. 
+
+
+What transformation of the response could make the standard deviations more equal?  
+The log standard deviation vs log means plot for the groups can tell us if there is a transformation that can make the standard deviations more equal. If the points lie close to a line, such a transformation exists with the power=1-slope.
+```{r}
+means <- aggregate(vertical_diameter ~ diagnostic + region, data = data, FUN = mean)
+
+sds <- aggregate(vertical_diameter ~ diagnostic + region, data = data, FUN = sd)
+
+mean_vd = means$vertical_diameter
+sd_vd = sds$vertical_diameter
+plot(log(mean_vd), log(sd_vd))
+transform_model = lm(log(sd_vd) ~ log(mean_vd))
+abline(transform_model)
+transform_model$coefficients
+```
+The points also lie fairly close to the line, so such a transformation may exist. The slope is close to 1, so the log standard deviations vs log means plot suggests a log transform of the response. 
+
+First, let's see if there is still an interaction after taking the log of vertical diameter.
+
+```{r}
+interaction.plot(data$region, data$diagnostic, log(data$vertical_diameter))
+
+```
+There is still evidence of interaction after transforming to logs. 
+
+Let's create the model now.
+```{r}
+log_model = aov(log(data$vertical_diameter) ~ data$diagnostic* data$region)
+summary(log_model)
+```
+
+Our model has the form 
+$$\log VD = \mu + \alpha_i + \beta_j + \gamma_{ij} + \epsilon $$
+
+Interestingly, compared to the previous model, the p-values for diagnostic and the interaction term decreased. From the output, we have 3 new F values and p-values.  
+The first null hypothesis associated with $F=9.001$ is   
+$H_0: \alpha_i = 0$ for all $i$  
+The second null hypothesis associated with $F=14.365$ is  
+$H_0: \beta_j = 0$ for all $j$  
+The third null hypothesis associated with $F=2.755$ is  
+$H_0: \gamma_{ij} = 0$ for all $i,j$
+
+Note that this time the response is log vertical diameter. Since the p-value is small $<0.05$ for all three tests, there is sufficient evidence to reject all three null hypotheses.
+
+Now let's check model assumptions.  
+
+Residuals are random and independent:  
+This is the same. Based on the data collection methods, we can think of the residuals as "like" random. Also it makes sense to consider the residuals as independent since in general, the vertical diameter for one patient shouldn't affect the vertical diameter for another patient.
+
+Residuals have the same variability in each group (combination of levels):  
+For this condition, we can look at a residuals vs fitted values plot.
+```{r}
+plot( log_model$fitted.values, log_model$residuals)
+abline(0,0)
+```
+Compared to the previous residuals vs fitted values plot, the spread of the residuals across different fitted values seems to be closer to constant. There is not an obvious pattern of increasing variance over increasing fitted values. Additionally, compared to the previous plot, the residuals are not as extreme. The log transformation did seem to make the standard deviations more equal. For the "additivity" of effects assumption, there is no obvious pattern which is a good sign. Additionally, there aren't any points that we would consider extreme outliers, so this model meets the "additivity" assumption better than the previous model. 
+
+Residuals are normally distributed:  
+For this condition, we can look at a normal quantile plot.  
+```{r}
+qqnorm(log_model$residuals)
+qqline(log_model$residuals)
+```
+Compared to the previous normal quantile plot, the upper quantiles are much more reasonable, though still not as expected if the residuals were actually normally distributed. Additionally, the lower quantiles now show deviation from normality when they actually fit the normal distribution pretty well before. Overall, this is an improvement compared to the last model. Since ANOVA is considered robust against the normality assumption, these smaller deviations from normality shouldn't be too big of a concern. 
+
+Our final model will be the model with the log transformation of vertical diameter. 
+
+## Statistical inference: 
+
+Since interaction is present, it makes more sense to focus on inference about conditional effects. For example, let's look at cases where the lesion was found on the arm. 
+
+From the ANOVA table, the p-value of 5.18e-05 for the test that the interaction effects are all 0 suggests that there is sufficient evidence that at least one of the interaction effects is nonzero. Let's try to identify which of the mean diameters are different from each other, conditional on the region.
+
+Our approach will be to construct confidence intervals. We can use Fisher's Least Significant Difference to try to detect differences in vertical diameter across the different diagnostics conditional on the region. The caveat in using Fisher's Least Significant Difference is that each test is conducted based on the chosen significance level, meaning the probability of making a Type I error accumulates over multiple tests. For instance, if we conduct 3 tests at a 95% confidence level, then the probability of making a Type I error will be more than 5% since the probability that none of the tests make a Type I error is $0.95^3$. Thus, we need to keep this in mind when assessing the intervals. In this case, we are interested in exploration so it is acceptable to make this trade-off for stronger detecting ability. These confidence intervals assume constant variance of the residuals, which is met by our model. 
+
+
+We will choose a confidence level of 95% for our pairwise difference intervals. 
+```{r}
+fisher_lsd <- function(conf, model, region, data){
+  # filter data for region 
+  filter_data = data[data$region == region, ]
+  
+  # get sample sizes 
+  ack_count = sum(filter_data$diagnostic == "ACK")
+  bcc_count = sum(filter_data$diagnostic == "BCC")
+  scc_count = sum(filter_data$diagnostic == "SCC")
+  
+  # get cell means (for log vertical diameter)
+  ack_mean <- mean(filter_data$log_vertical_diameter[filter_data$diagnostic == "ACK"])
+  bcc_mean <- mean(filter_data$log_vertical_diameter[filter_data$diagnostic == "BCC"])
+  scc_mean <- mean(filter_data$log_vertical_diameter[filter_data$diagnostic == "SCC"])
+  
+  # differences in cell means 
+  ack_bcc_diff = ack_mean - bcc_mean 
+  ack_scc_diff = ack_mean - scc_mean 
+  bcc_scc_diff = bcc_mean - scc_mean 
+  
+  # get mse 
+  mse = summary(model)[[1]]["Residuals", "Mean Sq"]
+  sd_1 = sqrt(mse)
+  
+  # get the t value for the chosen conf level
+  df_error = summary(model)[[1]]["Residuals", "Df"]
+  upper = conf + (1-conf)/2
+  t_val = qt(upper, df_error)
+  
+  # difference between ack and bcc 
+  se_ack_bcc = sd_1 * sqrt((1/ack_count) + (1/bcc_count))
+  # margin of error 
+  me_ack_bcc = t_val * se_ack_bcc 
+  ack_bcc_itv = c(ack_bcc_diff-me_ack_bcc, ack_bcc_diff+me_ack_bcc)
+  
+  # difference between ack and scc 
+  se_ack_scc = sd_1 * sqrt((1/ack_count) + (1/scc_count))
+  me_ack_scc = t_val * se_ack_scc 
+  ack_scc_itv = c(ack_scc_diff-me_ack_scc, ack_scc_diff+me_ack_scc)
+  
+  # difference between bcc and scc
+  se_bcc_scc = sd_1 * sqrt((1/bcc_count) + (1/scc_count))
+  me_bcc_scc = t_val * se_bcc_scc 
+  bcc_scc_itv = c(bcc_scc_diff-me_bcc_scc, bcc_scc_diff+me_bcc_scc)
+  
+  print("ACK vs BCC")
+  print(ack_bcc_itv)
+  print("ACK vs SCC")
+  print(ack_scc_itv)
+  print("BCC vs SCC")
+  print(bcc_scc_itv)
+  c(ack_bcc_itv, ack_scc_itv, bcc_scc_itv)
+  
+}
+
+```
+
+Let's try to identify if any of the mean log diameters are different from each other, conditional on the region being arm.
+
+```{r}
+arm_itvs = fisher_lsd(0.95, log_model, 'ARM', data)
+```
+Here's how we can interpret these intervals. When the region is arm, we can be 95% confident that the difference in mean log vertical diameter between an ACK lesion and a BCC lesion is between -0.709 and -0.252. When the region is arm, we can be 95% confident that the difference in mean log vertical diameter between an ACK lesion and an SCC lesion is between -0.733 and -0.174. When the region is arm, we can be 95% confident that the difference in mean log vertical diameter between a BCC lesion and an SCC lesion is between -0.243 and 0.297. Notice that the ACK vs BCC and ACK vs SCC intervals do not contain 0. Thus, there is sufficient evidence that the differences in mean log vertical diameters between ACK and BCC and ACK and SCC, conditional on the region being arm, are significant at the 95% confidence level. However, the BCC vs SCC interval contains 0, so there is not sufficient evidence that the difference in mean log vertical diameter between BCC and SCC, conditional on the region being arm, is significant at the 95% level.
+
+This time, let's condition on the region being face. 
+```{r}
+face_itvs = fisher_lsd(0.95, log_model, 'FACE', data)
+```
+Here's how we can interpret these intervals. When the region is face, we can be 95% confident that the difference in mean log vertical diameter between an ACK lesion and a BCC lesion is between -0.142 and 0.197. When the region is face, we can be 95% confident that the difference in mean log vertical diameter between an ACK lesion and an SCC lesion is between -0.350 and 0.141. When the region is face, we can be 95% confident that the difference in mean log vertical diameter between a BCC lesion and an SCC lesion is between -0.331 and 0.067. Notice that all of these intervals contain 0. Thus, there is not sufficient evidence that the differences in the mean log vertical diameter between the different diagnostic groups, conditional on the region being face, are significant at the 95% level.
+
+Since the confidence intervals are given in logs, it may be useful to convert to standard scale. 
+```{r}
+undo_log <- function(itvs){
+  ack_bcc_itv = exp(itvs[1:2])
+  ack_scc_itv = exp(itvs[3:4])
+  bcc_scc_itv = exp(itvs[5:6])
+  
+  print("ACK vs BCC")
+  print(ack_bcc_itv)
+  print("ACK vs SCC")
+  print(ack_scc_itv)
+  print("BCC vs SCC")
+  print(bcc_scc_itv)
+  c(ack_bcc_itv, ack_scc_itv, bcc_scc_itv)
+  
+}
+```
+
+```{r}
+arm_standard_itvs = undo_log(arm_itvs)
+```
+Here's how we can interpret these intervals. When the region is arm, we can be 95% confident that the ratio of mean vertical diameter between an ACK lesion and a BCC lesion is between 0.492 and 0.778. When the region is arm, we can be 95% confident that the ratio of mean vertical diameter between an ACK lesion and a SCC lesion is between 0.481 and 0.840. When the region is arm, we can be 95% confident that the ratio of mean vertical diameter between a BCC lesion and an SCC lesion is between 0.784 and 1.345. Notice that only the last interval contains 1 (no difference in scale).
+
+```{r}
+face_standard_itvs = undo_log(face_itvs)
+```
+
+Here's how we can interpret these intervals. When the region is face, we can be 95% confident that the ratio of mean vertical diameter between an ACK lesion and a BCC lesion is between 0.868 and 1.218. When the region is face, we can be 95% confident that the ratio of mean vertical diameter between an ACK lesion and a SCC lesion is between 0.705 and 1.152. When the region is face, we can be 95% confident that the ratio of mean vertical diameter between a BCC lesion and an SCC lesion is between 0.718 and 1.069. Notice that all of these intervals contain 1 (no difference in scale).
+
+Thus, we can see that differences in mean vertical diameter between the diagnostic groups may or may not exist depending on the region of the skin lesion. In the case that the region is arm, we found significant differences in the mean vertical diameter for ACK vs BCC and ACK vs SCC. In the case that the region is face, we found no significant differences in the mean vertical diameter between the groups. Thus, depending on the skin region, vertical diameter may or may not be helpful in diagnosing the type of skin lesion. 
+
+## Conclusion: 
+
+After constructing a 2-way ANOVA model with interaction with log vertical diameter as the response and region and diagnostic as the predictors, we found that there was sufficient evidence to reject all three null hypotheses: there was sufficient evidence that at least one region effect is nonzero, at least one diagnostic effect is nonzero, and at least one interaction effect is nonzero. A significant result from the ANOVA, especially for the interaction term, justifies the use of Fisher's LSD to try to identify for which groups are the mean log vertical diameters different. Since interaction is present, it makes more sense to focus on inference about conditional effects. Thus, we looked at two different cases: differences in mean log diameter between the three diagnostics conditioned on the region being arm, and differences in mean log diameter between the three diagnostics conditioned on the region being face. 
+
+When the region was arm, our 95% confidence intervals for the difference in mean log vertical diameter between ACK and BCC and ACK and SCC did not contain 0. This means there is sufficient evidence that the differences in mean log vertical diameters between these groups, conditional on the region being arm, are significant. However, our 95% confidence interval for the difference in meean log vertical diameter between BCC and SCC did contain 0. This means there is not sufficient evidence that the difference in mean log vertical diameter between BCC and SCC cases, conditional on the region being arm, is significant. 
+
+When the region was face, all of our 95% confidence intervals for the difference in mean log vertical diameter between the different diagnostic groups contained 0. Thus, when the region is face, there is not sufficient evidence that there is a significant difference in mean log vertical diameters between the three diagnostic groups. We can clearly see that the effect of diagnostic on vertical diameter depends on the region. We conclude that depending on the region, there may or may not be a significant difference in vertical diameter between diagnostic groups. 
+
+As for scope of inference, our data is observational, so we can't make any conclusions about cause and effect. However, we likely can extrapolate to the larger population of patients with skin lesions targeted by programs like the Federal University of Espirito Santo's Surgical Assistance Program since the observations are "like" random and independent based on the data collection method. One limitation of our data is that certain skin regions have more observations than others. Thus, our predictions and confidence intervals for the lesion vertical diameter of more obscure regions like lip may not generalize well to the larger population. 

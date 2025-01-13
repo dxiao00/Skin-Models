@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r echo=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  fig.align="center",
+  fig.pos="t",
+  strip.white = TRUE
+)
+```
+
+## About the data:  
+We look at the monthly maximum UV index from 2010 to 2024 in Plano, TX [(Source)](https://www.planoweather.com/wxuvsummary.php). Exposure to UV radiation is associated with risk of developing melanoma, with one study finding that 86% of melanomas can be attributed to UV radiation [(Source)](https://www.skincancer.org/skin-cancer-information/skin-cancer-facts/). A higher UV index means more extreme UV radiation, with UV indices above 6 indicating high risk of harm. 
+
+## Executive summary:  
+We fit an ARIMA model to the UV index from 2010 to 2024 in Plano, TX. We began by assessing the stationarity of the time series. We found an apparent seasonal trend, which was reflected in the ACF, along with an overall slight decreasing trend. As such, we needed to take both a seasonal and a regular difference. After differencing the series and examining the ACF and PACF plots, we were satisfied with the stationarity of our series regarding constant mean, variance, and autocorrelations, and moved on to model fitting.
+
+The final model with the best adherence to model conditions and best performance on metrics was the ARIMA$(1,1,1)(0,1,1)_{12}$ model with no intercept. This model had all terms significant, the lowest AIC out of all models tested, and very few significant autocorrelations in the ACF and PACF of the residuals. Additionally, the AR coefficient was not too close to 1 and the MA coefficients were not too close to -1, which suggests that there is no problem with our differencing. Looking at a QQ plot, the residuals were not perfectly normal, but normality did not seem to be too badly violated.
+
+After we fit the model, we used the forecast function to calculate interval estimates for the max Plano UV index for the next 12 months (December 2024 to November 2025). We found that the forecast followed the observed decreasing trend, predicting that the monthly UV indices for 2025 will be even lower than for 2024. Since areas around Plano likely receive very similar sun radiation, we can probably generalize our forecast to a small area around Plano. Additionally, our model is limited in forecast period because if we predict too far out into the future, we will eventually obtain interval estimates that contain negative UV indices and negative point estimates.
+
+
+```{r}
+data = read.csv("plano_actual_max_uv.csv")
+```
+
+## Conditions:  
+
+Our data is a time series where observations are taken regularly (monthly). To fit an ARIMA model, one of the conditions is that our data is stationary (could be after differencing). In many cases, our time series is not independent, so the value at one time can tell us about the value at another time. Stationarity is one way to model the dependence structure of data values at different times. If we have stationary data, then the World decomposition theorem tells us that it can be modeled with an ARMA model. Thus, we need to have stationary data if we want to use these models [(Stack Exchange Link)](https://stats.stackexchange.com/questions/19715/why-does-a-time-series-have-to-be-stationary
+).  
+
+We want the model to apply for all times. The specific time that we make an observation is not as important as the time that we make an observation relative to other observations. We are really interested in the relationship between observations at different times. 
+
+Stationarity assumes constant mean, constant variance, and constant autocorrelations. We can assess the first two conditions by looking at a plot of the UV index over time. 
+
+```{r}
+plot(data$UV_index, type="l")
+```
+
+
+The constant mean condition does not hold. There is a clear seasonal pattern in the UV index, so it does not make sense to say that the mean is constant at all times. There also looks to be an overall slight decreasing trend. Regarding constant variance, it is a little harder to assess when the mean is not constant, but the amplitude doesn't seem to change much over time. There is clear evidence that the data is not stationary. Let's look at the ACF plot to assess the constant autocorrelations condition.
+
+```{r}
+acf(data$UV_index)
+```
+
+The periodic pattern also shows up in the ACF plot. The ACF shows a pattern of decreasing but still significant autocorrelations for the earliest lags, including lags 1, 2, and 3. This suggests that the data is not stationary. Additionally, we see significant autocorrelations at later lags, with the largest spikes occuring at lag 6 and lag 12. This suggests a seasonal component in the data. 
+
+To make the data stationary, we can try to take differences. Based on the nature of the data, it makes sense to take a seasonal difference of 12. Also, based on the decreasing trend, it makes sense to take a regular difference. 
+
+```{r}
+diff_uv = diff(diff(data$UV_index, 12))
+plot(diff_uv, type="l")
+mean(diff_uv)
+```
+
+Compared to before, it is more believable that the mean is constant. There is no seasonal pattern or long-term increasing or decreasing trend. The mean of the differenced series is around 0.001807, which suggests that a drift term is not needed. The variance also looks believably constant over time. 
+
+
+```{r}
+acf(diff_uv, lag.max=30)
+```
+
+After differencing, we no longer observe the periodic pattern in the autocorrelations. We also observe that the autocorrelations drop in significance quickly after lag 1. There are significant autocorrelations at lags 1, 12, and some other random lags. Since the autocorrelations drop in significance quickly and there is no persistent periodic pattern in the autocorrelations, the differenced series is relatively stationary. The significant spikes at lag 1 and lag 12 suggest that we may need to include both regular and seasonal AR or MA terms in our model. 
+
+## Choices:  
+
+Looking at the ACF plot together with the PACF plot can inform us about whether to include autoregressive (AR) or moving average (MA) terms and the number of them to include. The PACF plot is similar to the ACF plot, with the difference being that it shows the autocorrelation at each lag $t$ after accounting for all prior lags.
+
+```{r}
+acf(diff_uv, lag.max=30)
+pacf(diff_uv, lag.max=30)
+```
+
+
+The ACF shows significant autocorrelations at lag 1 and lag 12, with some other random lags also having significant autocorrelations, such as lag 11. The PACF also shows significant autocorrelations at lag 1 and lag 12, with other spikes at lags 2, 3, and 5. There is also a highly significant spike at lag 11. The first stretch from lag 1 to lag 10 in the PACF looks a little like exponential decay. Additionally, from lag 2 to lag 10 in the ACF, there doesn't seem to be any significant spikes. Together, this could suggest including a regular MA term. 
+
+Additionally, the significant spikes near lag 12 in both the ACF and PACF plot suggests that we may need to include either a seasonal MA or AR term. There's not really an exponential decay pattern in the spikes after lag 12 in either plot, so there's no clear indication about which term is better to include [(OTexts)](https://otexts.com/fpp2/seasonal-arima.html). 
+
+## Fit:  
+
+Let's first try an ARIMA$(0,1,1)(0,1,1)_{12}$ model.  
+
+From [(Hyndman)](https://robjhyndman.com/talks/RevolutionR/10-Seasonal-ARIMA.pdf), the ARIMA$(0,1,1)(0,1,1)_{12}$ model without an intercept has the form 
+
+$$ (1-B)(1-B^{12})Y_t = (1 + \theta_1 B)(1+\Theta_1 B^{12}) \epsilon_t$$
+
+$$ Y_t =  Y_{t-12} + Y_{t-1} - Y_{t-13} + (\epsilon_t + \Theta_1 \epsilon_{t-12} + \theta_1 \epsilon_{t-1} + \theta_1 \Theta_1 \epsilon_{t-13}) $$
+
+where $\epsilon_t$ is the random normal error at time $t$, $\theta_1$ is the slope for the first regular MA term, and $\Theta_1$ is the slope for the first seasonal MA term. 
+
+The fitted model is of the form 
+$$ \hat Y_t =  Y_{t-12} + Y_{t-1} - Y_{t-13} + (\hat \Theta_1 \hat \epsilon_{t-12} + \hat \theta_1 \hat \epsilon_{t-1} + \hat \theta_1 \hat \Theta_1 \hat \epsilon_{t-13}) $$
+where we estimate the past errors using the residuals from the model fit.
+
+From the R arima documentation, the model is fit using conditional-sum-of-squares to find starting values, then maximum likelihood. Since our model uses differencing, the fitting method uses a Bayesian-like approach to account for non-stationary components by giving them a diffuse prior. In the context of time series, an innovation is the difference between the actual value at time $t$ and the forecast based on information available prior to time $t$. The conditional sum of squared innovations is minimized, that is, the sum of squared innovations is minimized for points after a certain observation, depending on the maximum lag of an AR term. Since the initial innovations are treated as zero, the part log-likelihood is computed as an approximation for the likelihood. 
+
+
+```{r}
+library("forecast")
+library("lmtest")
+
+fit1=Arima(data$UV_index, order=c(0,1,1), seasonal=list(order=c(0,1,1),period=12))
+fit1
+coeftest(fit1)
+```
+## Assess Fit and Conditions:  
+
+The fitted model is 
+$$ \hat Y_t = Y_{t-12} + Y_{t-1} - Y_{t-13} + (-0.803 \hat \epsilon_{t-12} + -0.702 \hat \epsilon_{t-1} + (-0.701)(-0.803) \hat \epsilon_{t-13}) $$
+
+We can see that the regular MA term and seasonal MA term are both significant at the 5% level. Additionally, neither the regular MA term nor the seasonal MA term are too close to -1, which would indicate a problem with our differencing (too much differencing). This suggests that our first model is sensible.  
+
+We can also check the model for adherence to conditions by looking at the ACF of the residuals. 
+
+```{r}
+acf(fit1$residuals, lag.max=30)
+pacf(fit1$residuals, lag.max=30)
+```
+
+There are a few things to notice in the ACF and PACF of the residuals. We no longer observe a significant spike at lag 12, which suggests that our seasonal MA term effectively accounted for the dependence at lag 12. However, we do see significant spikes at lags 5 and 10 in both the ACF and PACF. There also appears to be a barely significant spike at lag 11 in the ACF. However, this could very well be due to the nature of conducting multiple significance tests. When we conduct 30 tests at the 5% level, it is not unusual for one or two results to show up as significant when they are really not significant. What is somewhat more concerning is that the significant spikes are close to each other in the case of lags 10 and 11 in the ACF. This could suggest that there is some dependence between lags that our model does not account for. Otherwise, at other time lags, we do not see any significant autocorrelations in the ACF and PACF. 
+
+The ARIMA model also assumes that the errors are normally distributed, though we place more importance on the autocorrelation structure (lack of autocorrelation in residuals). We can assess normality by looking at a QQ plot and a histogram. 
+
+```{r}
+qqnorm(fit1$residuals)
+qqline(fit1$residuals)
+hist(fit1$residuals)
+```
+
+Since the points deviate from the line at the upper and lower quantiles in the QQ plot, the residuals are not perfectly normal. The histogram also appears to have a longer left tail. Normality of residuals is a little concerning, but not too badly violated.
+
+Now let's try to see if we can improve the model. I tried multiple combinations of AR terms, MA terms, and differences, but the most successful one was the ARIMA$(1,1,1)(0,1,1)_{12}$ model with no intercept. 
+
+$$(1-\phi_1B)(1-B)(1-B^{12})Y_t =  (1 + \theta_1B)(1 + \Theta_1 B^{12}) \epsilon_t$$ 
+
+$$ Y_t =  Y_{t-1} + Y_{t-12} - Y_{t-13} + \phi_1 (Y_{t-1} - Y_{t-2} - Y_{t-13} + Y_{t-14}) + \epsilon_t + \theta_1 \epsilon_{t-1} + \Theta_1 \epsilon_{t-12} + \theta_1 \Theta_1 \epsilon_{t-13}) $$
+The fitted model is 
+$$ \hat Y_t =  Y_{t-1} + Y_{t-12} - Y_{t-13} + \hat \phi_1 (Y_{t-1} - Y_{t-2} - Y_{t-13} + Y_{t-14})  + \hat \theta_1 \hat \epsilon_{t-1} + \hat \Theta_1 \hat \epsilon_{t-12} + \hat \theta_1 \hat \Theta_1 \hat \epsilon_{t-13}) $$
+
+```{r}
+fit2=Arima(data$UV_index, order=c(1,1,1), seasonal=list(order=c(0,1,1),period=12), include.constant=FALSE)
+fit2
+coeftest(fit2) 
+```
+
+The regular AR, regular MA, and seasonal MA terms are all significant at the 5% level in this model. The $\hat \sigma$, which considers the sum of squared residuals along with the number of predictors, decreased from 0.5967 to 0.5633, so there is less variance in the errors for the new model compared to the first model. The log-likelihood also increased from -198.22 to -193.97, indicating a better model fit. Additionally, none of the coefficients are too close to 1 or -1, so there is no problem with our differencing. Lastly, we can compare our two models by looking at their AICs, which describes how well the models fit the data by looking at the likelihood and accounting for the number of estimated parameters. For the AIC, a lower value is better. We see that compared to the original model, the AIC decreased from 402.44 to 395.95. 
+
+
+```{r}
+acf(fit2$residuals, lag.max=30)
+pacf(fit2$residuals, lag.max=30)
+```
+
+The main differences from the first model are that the ACF and PACF no longer show a significant correlation at lag 5 and the ACF for the new model does not show a significant autocorrelation at lag 11. This alleviates some concern about the two significant spikes being close to each other. There is still a significant autocorrelation at lag 10. Overall, the ACF and PACF look better for the new model compared to our first model. 
+
+
+```{r}
+qqnorm(fit2$residuals[-(1:12)])
+qqline(fit2$residuals[-(1:12)])
+```
+
+The QQ plot for the residuals of the new model is similar to the first QQ plot. Since the points deviate from the line at the upper and lower quantiles in the QQ plot, the residuals are not perfectly normal. Normality of residuals is a little concerning, but not too badly violated.
+
+Since all of the terms are significant, the AIC is smaller compared to the first model, and the ACF and PACF no longer show significant autocorrelations at lags 5 and 11, the ARIMA$(1,1,1)(0,1,1)_{12}$ with no intercept will be our final model. 
+
+## Use Model for Statistical Inference:  
+
+Now that we have our model, we can use it to make some predictions. Let's try to predict the maximum UV index for the next 12 months, from December 2024 to November 2025. 
+
+When a prediction requires an error term, if an actual observation was made, then we will use the residuals from the model to estimate the error. Otherwise, we will assume the error is 0. When a prediction requires the UV index at a particular time, if an actual observation was made, then we will use the actual observation. Otherwise, we will use the forecast from the model. 
+
+```{r}
+fore <- forecast(fit2, 12)
+
+point_estimates <- fore$mean
+lo_95 <- fore$lower[, 2]  
+hi_95 <- fore$upper[, 2]  
+
+print(data.frame(Point_Estimate = point_estimates, Lo_95 = lo_95, Hi_95 = hi_95))
+```
+
+The point estimates are the single best estimates for the UV index in the respective months. We can interpret the confidence intervals like so: we are 95% confident that the maximum Plano UV index for December 2024 is between 0.3058 and 3.2499. We can interpret the other forecast confidence intervals similarly. We are 95% confident that the maximum Plano UV index for January 2025 is between 0.6706 and 3.8586, and so on. 
+
+We can also visualize the predictions by plotting the forecast. The blue line represents the point estimates, the darker gray region represents the 80% confidence interval, and the lighter gray line represents the 95% confidence interval. 
+
+```{r}
+plot(forecast(fit2, 12))
+```
+
+## Conclusion:  
+
+Based on the plot, our model predicts that the UV index will continue to follow the same general pattern as in previous years. Overall, the forecasted point estimates look slightly smaller than the UV indices from the previous years. 
+
+As for scope of inference, the model is probably generalizable to a small area around Plano. As we move further away from Plano, then our interval estimates become less and less accurate. Additionally, if we increase the forecast period, we will eventually reach a point where our point estimates are negative and our interval estimates include negative UV indices. This is obviously nonsensical, so there is a limit to how many years in the future we can forecast.
+
+
+
+

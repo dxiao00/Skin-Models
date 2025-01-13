@@ -1,0 +1,331 @@
+---
+title: "Regression Model for Predicting Time of Survival in Months for Deadly Melanoma Cases"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+<!-- The author of this template is Dr. Gordan Zitkovic.-->
+<!-- The code chunk below contains some settings that will  -->
+<!-- make your R code look better in the output pdf file.  -->
+<!-- If you are curious about what each option below does, -->
+<!-- go to https://yihui.org/knitr/options/ -->
+<!-- If not, feel free to disregard everything ...  -->
+```{r echo=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  fig.align="center",
+  fig.pos="t",
+  strip.white = TRUE
+)
+```
+<!-- ... down to here. -->
+
+### Introduction 
+Melanoma is a type of skin cancer that is mostly caused by exposure to UV light. In many cases, we can treat melanoma successfully if it is caught early [(more info on melanoma)](https://www.mayoclinic.org/diseases-conditions/melanoma/symptoms-causes/syc-20374884). 
+In the event that we do not detect the symptoms of melanoma early, causing treatment to be delayed, we can imagine that the cancer can become a cause of death. If we have strong reason to believe that a particular case of melanoma is deadly, then it may be important for the patient or family members of the patient to know how much time they have left to live. Thus, the goal of this regression model is to predict the time in months from diagnosis that a patient has to live for cases of melanoma where the cause of death is the cancer itself. 
+
+The data was collected from the [SEER Cancer Database](https://seer.cancer.gov/) by filtering for melanoma cases where the cause of death can be attributed to the cancer itself. The SEER program tracks cancer incidents from all over the United States starting from 1973. The data was cleaned to remove rows with missing values. The final dataset has 3431 rows and 11 variables, including the response.
+```{r}
+data = read.csv("cleaned_melanoma_deaths.csv")
+```
+
+
+### Executive Summary
+This is the final model with the best adherence to model conditions: 
+```{r}
+final_model = lm(sqrt(survival_months) ~ num_situ_malignant_tumors +
+                   age + 
+                   breslow_thickness + 
+                   mitotic_rate + 
+                   sequence_number + 
+                   sex + 
+                   married + 
+                   lymph_node_involvement + 
+                   breslow_thickness * num_situ_malignant_tumors +
+                   mitotic_rate * lymph_node_involvement,
+                 data=data)
+summary(final_model)
+```
+As we can see, the $R^2$ is low, suggesting that the model only explains 25.64% of the total variability in survival months. A low $R^2$ does not necessarily mean that the relationship between the response and the predictors is not linear, but it does mean that the model does not capture much of the variability in the response. Some possible reasons for the low $R^2$ could be that there are key variables for predicting survival months that are not present in the model, or the relationship between the response and predictors is actually not linear. Additionally, this model has some problems with the condition of constant variance of the residuals.
+
+The goal of our model is to predict the survival time in months for cases where we have strong reason to believe that the cancer is deadly. For this goal, we can look at the confidence intervals for the mean response and prediction intervals for individual responses produced by our model for a given set of predictor values $X$.
+
+Here we can give an example of the confidence intervals produced by our model: 
+```{r}
+set.seed(200)
+sampled_data <- data[sample(nrow(data), 5), ]
+conf_inter = as.data.frame(predict(final_model, newdata = sampled_data, interval = "confidence"), level=0.95)
+conf_df = data.frame(conf_inter$fit^2, conf_inter$lwr^2, conf_inter$upr^2, sampled_data$survival_months)
+conf_df
+```
+We can interpret the confidence intervals like so: we are 95% confident that the true mean survival months for patients with the values of num_situ_malignant_tumors, age, breslow_thickness, etc. being the same as in each row is between lwr and upr for the respective row. For example, we are 95% confident that the true mean survival months for patients with the same predictor values as the patient in the first row is between 33.20 and 37.49.
+```{r}
+pred_inter = as.data.frame(predict(final_model, newdata = sampled_data, interval = "prediction"), level=0.95)
+pred_df = data.frame(pred_inter$fit^2, pred_inter$lwr^2, pred_inter$upr^2, sampled_data$survival_months)
+pred_df
+```
+We can interpret the prediction intervals similarly, with the difference being that we are 95% confident that the intervals contain the true individual survival months for a new patient. As we can see, the prediction intervals are very large, which brings into question the usefulness of this model for predicting survival time for deadly cases. This large interval suggests that the model does not capture sufficient variability in the response to make useful predictions and that there are likely good explanatory variables that are missing from the model.
+We may find the confidence intervals more useful since they are smaller and give us a more focused idea of what the mean survival time for patients with some given predictor values could be. Still, these intervals assume constant variance in the residuals, which is not met by the model.
+
+
+### Choices and Fit and Assess Fit
+
+Response variable: 
+
+**survival_months**: Time in months from diagnosis to death.
+
+Potential predictor variables: 
+
+**num_situ_malignant_tumors**: Number of in situ and malignant tumors. An in situ tumor is a pre-cancerous tumor that has not invaded surrounding tissues, but can develop into invasive cancer. A malignant tumor is a cancerous tumor that can spread to surrounding tissues. I would expect the relationship between num_situ_malignant_tumors and survival_months to be negative since the more malignant tumors there are, the more serious the case is. 
+
+**age**: Age of the patient at diagnosis, in bins of size 5. I would expect the relationship between age and survival_months to be negative since health declines with age.
+
+**breslow_thickness**: Measurement of depth or thickness of the melanoma tumor. I would expect the relationship between breslow_thickness and survival_months to be negative since a deeper tumor seems more difficult to treat. 
+
+**mitotic_rate**: Number of mitotic divisions of the tumor in a square millimeter area. A larger mitotic_rate means a more aggressive cancer. I would expect the relationship between mitotic_rate and survival_months to be negative.
+
+**married**: Whether the patient was married at diagnosis.
+
+**sequence_number**: The sequence number for this particular tumor. A sequence number of 1 means that this is the first tumor treated for this patient. I would expect the relationship between sequence_number and survival_months to be negative since higher sequence numbers means that the patient has a history of poor health.
+
+**lymph_node_involvement**: Whether the cancer has spread to lymph nodes at diagnosis. I would expect smaller survival_months if there is lymph node involvement since infected lymph nodes cannot fight cancer as effectively. 
+
+**year_of_diagnosis_minus_2009**: Year of diagnosis - 2009. Better technology and medicine may mean more recent diagnoses have longer survival time. 
+
+**time_from_diag_to_treat**: Time from diagnosis to treatment. Patients who are treated quickly may live longer.
+
+We want to create a linear regression model that predicts survival months from these predictors. That is, we want a model of the form 
+$$\hat Y = \hat \beta_0 + \hat \beta_1 X_1 + \hat \beta_2 X_2 + \text{...} $$ 
+where $\hat Y$ is the predicted survival time in months, $X_i$ are the predictors (the variables described above or some combination or transformation of them) and $\hat \beta_i$ are the fitted slopes for the predictors. 
+We can estimate the slopes for these variables by finding the values of $\hat \beta$ that minimize the sum of squared errors 
+$$\sum (y_i- \hat y_i)^2 $$ 
+where $y_i$ is the true survival in months and $\hat y_i$ is the predicted survival in months from our regression model. 
+
+#### Exploratory Data Analysis
+
+We can create pairwise scatter plots to get an idea of which predictor variables might be most useful in predicting survival months. We would be looking for plots where a strong linear relationship is present. 
+
+```{r}
+numeric_data <- data[sapply(data, is.numeric)]
+pairs(numeric_data)
+```
+
+From the pairwise scatter plots, there is a concerning pattern for survival_months vs year_of_diagnosis_minus_2009 since there seems to be a cap for each year. This makes sense since if you were diagnosed in 2018 and died, then you couldn't have lived for 120 months. This means year_of_diagnosis_minus_2009 is not an appropriate predictor since it leaks information about the response.
+Otherwise, looking at the other plots for survival_months, there doesn't seem to be a strong linear relationship with any of the other predictors, which is not ideal. 
+
+First, let's try to create a model with all of the predictors except year_of_diagnosis_minus_2009.
+
+```{r}
+first_model = lm(survival_months ~ num_situ_malignant_tumors +
+             age + 
+             breslow_thickness + 
+             mitotic_rate + 
+             sequence_number + 
+             time_from_diag_to_treat + 
+             sex + 
+             married + 
+             lymph_node_involvement ,
+           data=data)
+summary(first_model)
+```
+We can see that the $R^2$ for this model is low at 0.2469 even when most of the predictors are significant. From the pairwise scatter plot, this makes sense since it didn't seem like any of the predictors had a strong linear relationship with survival months. The p-value for the F-statistic is very small, suggesting there is sufficient evidence that at least one of the predictors has a nonzero slope. Let's see if adding interaction terms can help capture some of the nonlinear relationships between the response and the predictors.
+
+Potential interaction terms: 
+
+**num_situ_malignant_tumors:breslow_thickness**: A deep/thick tumor (high breslow thickness) has probably been around for a while, so if the cancer has spread, then the other tumors are probably also deep. 
+
+**mitotic_rate:lymph_node_involvement**: A tumor could be even more dangerous if it is both dividing rapidly and spreading to lymph nodes. 
+
+**num_situ_malignant_tumors:mitotic_rate**: Assuming that mitotic divisions are occurring at a similar rate across different tumors, then the more tumors there are, the more severe the condition becomes. 
+
+```{r}
+second_model = lm(survival_months ~ num_situ_malignant_tumors +
+             age + 
+             breslow_thickness + 
+             mitotic_rate + 
+             sequence_number + 
+             time_from_diag_to_treat + 
+             sex + 
+             married + 
+             lymph_node_involvement + 
+               num_situ_malignant_tumors*breslow_thickness + 
+               mitotic_rate*lymph_node_involvement + 
+               num_situ_malignant_tumors*mitotic_rate,
+           data=data)
+summary(second_model)
+```
+Adding interaction terms did increase the $R^2$, but only very slightly. We probably cannot improve much more on the $R^2$ with these predictors. From the output, the p-values for the individual t-tests suggest that time_from_diag_to_treat and num_situ_malignant_tumors:mitotic_rate are not significant predictors. However, these predictors may still be significant since the small p-value could be due to collinearity. We can conduct a nested F-test to make sure. 
+
+```{r}
+reduced_model = lm(survival_months ~ num_situ_malignant_tumors +
+             age + 
+             breslow_thickness + 
+             mitotic_rate + 
+             sequence_number + 
+             sex + 
+             married + 
+             lymph_node_involvement + 
+               breslow_thickness * num_situ_malignant_tumors +
+               mitotic_rate * lymph_node_involvement,
+           data=data)
+summary(reduced_model)
+```
+We can calculate the nested F statistic as 
+$$F = \frac{(SSE_{red} - SSE_{full}) / p} {SSE_{full} / (n-k-1)} $$ 
+where $p$ is the number of predictors tested, $n$ is the number of observations, and $k$ is the number of predictors in the full model. 
+```{r}
+SSE_red = sum((reduced_model$residuals)^2)
+SSE_full = sum((second_model$residuals)^2)
+Fstat = ((SSE_red - SSE_full) / 2) / (SSE_full / (3431-14-1))
+1 - pf(Fstat, 2, 3431-14-1)
+```
+Since the p-value is large, there is not sufficient evidence that the slopes for the tested terms are not 0. This means it should be fine to remove these two terms from the model. We can also see that the $R^2$ did not change when we removed the two terms, but the adjusted $R^2$, which punishes bad predictors, increased slightly when we removed the two terms. 
+
+### Conditions and Assess Fit
+
+Let's check conditions for this model. We will look at the residuals vs fitted values to assess the linearity and constant variance of residuals conditions.
+
+```{r}
+plot(reduced_model$fitted.values, reduced_model$residuals)
+```
+
+There is a very concerning pattern of non-homoscedasticity in the residuals across different fitted values. Besides the non-constant variance, there doesn't seem to be a pattern, which is good for linearity. It looks like for the largest fitted values, the residuals are very negative. Let's see if taking a log or root transform of the response can help the variance issue. 
+
+```{r}
+log_model = lm(log(survival_months) ~ num_situ_malignant_tumors +
+             age + 
+             breslow_thickness + 
+             mitotic_rate + 
+             sequence_number + 
+             sex + 
+             married + 
+             lymph_node_involvement + 
+               breslow_thickness * num_situ_malignant_tumors +
+               mitotic_rate * lymph_node_involvement,
+           data=data)
+plot(log_model$fitted.values, log_model$residuals)
+```
+
+Taking log survival months as the response does not result in a great residuals vs fitted values plot. The points don't look randomly scattered but instead there looks to be a main cluster of points and straight lines below that cluster. Let's see if a root transform would be better.
+
+```{r}
+root_model = lm(sqrt(survival_months) ~ num_situ_malignant_tumors +
+             age + 
+             breslow_thickness + 
+             mitotic_rate + 
+             sequence_number + 
+             sex + 
+             married + 
+             lymph_node_involvement + 
+               breslow_thickness * num_situ_malignant_tumors +
+               mitotic_rate * lymph_node_involvement,
+           data=data)
+plot(root_model$fitted.values, root_model$residuals)
+```
+
+The root transformation still has the same issue of non-constant variance in the residuals across different fitted values, though the increasing spread is not as extreme as compared to the original response. While all three types of response have the problem of non-constant variance of the residuals, the root transform has the least extreme increasing spread, so we will keep this as the best model. 
+
+Let's look at the QQ plot and histogram to assess normality of residuals for the root model. 
+
+```{r}
+qqnorm(root_model$residuals)
+qqline(root_model$residuals)
+```
+
+The QQ plot shows the residuals are approximately normal for the middle quantiles, but deviate from normality at the ends, especially at the lower quantiles. 
+
+```{r}
+hist(root_model$residuals, breaks=20)
+```
+
+Looking at the histogram, we see an approximately normal distribution of the residuals, which is good. Overall, I would say that the normality of residuals condition is met. 
+
+From before, we saw that the largest fitted values had very negative residuals. We may be concerned about influential points affecting the model fit. Let's try to identify influential points with a standardized residuals vs leverage plot.
+
+```{r}
+leverage <- hatvalues(root_model)
+
+std_residuals <- rstandard(root_model)
+plot(leverage, std_residuals)
+
+# leverage is moderately unusual above 2(k+1)/n and very unusual above 3(k+1)/n
+abline(v=2*(12+1)/3431, col='red', lty=2, lwd=1)
+abline(v=3*(12+1)/3431, col='red', lty=2, lwd=1.5)
+
+# standardized residual is moderately unusual beyond +-2 and very unusual beyond +-3 
+abline(h=2, col='blue', lty=2, lwd=1)
+abline(h=-2, col='blue', lty=2, lwd=1)
+abline(h=3, col='blue', lty=2, lwd=1.5)
+abline(h=-3, col='blue', lty=2, lwd=1.5)
+
+# cook's distance is moderately unusual above 0.5 and very unusual above 1 
+curve(sqrt(((12+1)*(1-x)*0.5)/x), from = 0, to = 1, add = TRUE, col = "green", lwd = 1)
+curve(sqrt(((12+1)*(1-x))/x), from = 0, to = 1, add = TRUE, col = "green", lwd = 1.5)
+
+for (i in seq_along(leverage)) {
+  if (leverage[i] > 2*(12+1)/3431 && abs(std_residuals[i]) > 2) {
+    text(leverage[i], std_residuals[i], labels = i, pos = 4, cex = 0.8)
+  }
+}
+```
+At the level of cook's distance = 0.5 or 1, we cannot identify any influential points so any 1 point does not change the model so much. However, there are some points that are unusual in terms of leverage or residuals or both. 
+
+### Use Model for Statistical Inference
+
+The goal of our model is to predict the predict the survival time in months for cases where we have strong reason to believe that the cancer is deadly. For this goal, we can look at the confidence intervals for the mean response and prediction intervals for individual responses produced by our model for a given set of predictor values $X$.
+
+We can construct confidence intervals for the mean survival months of patients given a set of predictor values $X$:
+```{r}
+set.seed(200)
+sampled_data <- data[sample(nrow(data), 5), ]
+conf_inter = as.data.frame(predict(final_model, newdata = sampled_data, interval = "confidence"), level=0.95)
+conf_df = data.frame(conf_inter$fit^2, conf_inter$lwr^2, conf_inter$upr^2, sampled_data$survival_months)
+conf_df
+```
+We can interpret the confidence intervals like so: we are 95% confident that the true mean survival months for patients with the values of num_situ_malignant_tumors, age, breslow_thickness, etc. being the same as in each row is between lwr and upr for the respective row. For example, we are 95% confident that the true mean survival months for patients with the same predictor values as the patient in the first row is between 33.20 and 37.49.
+
+Now let's construct prediction intervals for the individual survival months of a new patient given a set of predictor values $X$:
+```{r}
+pred_inter = as.data.frame(predict(final_model, newdata = sampled_data, interval = "prediction"), level=0.95)
+pred_df = data.frame(pred_inter$fit^2, pred_inter$lwr^2, pred_inter$upr^2, sampled_data$survival_months)
+pred_df
+```
+We can interpret the prediction intervals similarly to the confidence intervals, with some important differences. We are 95% confident that the survival months for a new patient with the values of num_situ_malignant_tumors, age, breslow_thickness, etc. being the same as in each row is between lwr and upr for the respective row. 
+
+
+
+Consider the first case:
+```{r}
+sampled_data[1,]
+```
+
+The prediction interval tells us that we can be 95% confident that a new unmarried 70 year old male patient with 1 in situ or malignant tumor, a breslow thickness of 5, a mitotic rate of 1, a sequence number of 1, and no lymph node involvement will have a survival time between 4.49 and 95.38 months, which does not narrow it down much at all! This large interval suggests that the model does not capture sufficient variability in the response to make useful predictions and that there are likely good explanatory variables that are missing from the model.
+
+Instead, we may find the smaller confidence intervals for the mean survival months for a given set of predictors $X$ more useful. As an example, let's construct a confidence interval for some chosen set of predictor values! 
+```{r}
+my_values = data.frame(
+  sex = 'Female',
+  num_situ_malignant_tumors = 5,
+  age = 60,
+  breslow_thickness = 2,
+  mitotic_rate = 3, 
+  married = 'married',
+  sequence_number = 1, 
+  lymph_node_involvement = 'no'
+)
+
+my_conf_inter = as.data.frame(predict(final_model, newdata = my_values, interval = "confidence"), level=0.95)
+my_conf_df = data.frame(my_conf_inter$fit^2, my_conf_inter$lwr^2, my_conf_inter$upr^2)
+my_conf_df
+```
+We can be 95% confident that the mean survival months for 60 year old married women with 5 in situ or malignant tumors, a breslow thickness of 2, a mitotic rate of 3, a sequence number of 1, and no lymph node involvement is between 72.13 and 86.02. 
+
+There is an issue in that these confidence intervals assume constant variance of the residuals. However, as discussed previously, this issue is persistent in the model and not so easy to fix. Thus, when using these confidence intervals, we must keep in mind that they are likely not perfectly accurate.
+
+### Conclusion
+
+This model is not a great model for predicting survival time due to not meeting the constant variance of the residuals condition and explaining only a small proportion of the total variation in survival time. Because of the small $R^2$, which is likely due to missing important predictor variables, the prediction intervals for the survival months of new patients are so large that they are limited in their usefulness. While we can compute confidence intervals that may be more useful, these intervals may not be reliable since the confidence intervals were calculated assuming constant variance of residuals. For what the model does do well, it does meet the condition of normal errors, and the lack of a pattern in the residuals vs fitted values plot suggests that the linearity assumption is not too off. 
+
+Since the number of observations is quite large and the observations should be independent of each other, then we can likely generalize to the population of U.S. patients with deadly melanoma cases. There is the constraint of low counts of observations for younger ages (<40), so the model may not generalize well for new observations where age<40. 
